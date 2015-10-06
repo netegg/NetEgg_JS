@@ -4,6 +4,7 @@
   "description": "NetEgg Backend",
   "main": "index.js",
   "dependencies": {
+    "bcrypt-nodejs": "0.0.3",
     "bluebird": "^2.10.1",
     "body-parser": "^1.14.0",
     "envvar": "^1.0.0",

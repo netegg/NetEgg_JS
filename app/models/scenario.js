@@ -5,7 +5,6 @@ const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
 const scenarioSchema = new Schema({
-  scenarioId: mongoose.Schema.Types.ObjectId,
   userId: String,
   scenarioName: String,
   events: Array,
