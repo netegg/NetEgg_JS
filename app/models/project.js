@@ -7,8 +7,9 @@ const Schema = mongoose.Schema;
 const projectSchema = new Schema({
   projectName: String,
   userId: String,
-  eventFormat: { type: Schema.Types.Mixed, default: {} },
+  packetFormat: { type: Schema.Types.Mixed, default: {} },
   scenarios: Array,
+  builds: Array,
   created_at: Date,
   updated_at: Date
 });

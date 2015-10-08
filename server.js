@@ -6,6 +6,7 @@ const envvar = require('envvar');
 const express = require('express');
 const mongoose = require('mongoose');
 const R = require('ramda');
+const rp = require('request-promise')
 
 const db = require('./lib/db');
 const Project = require('./app/models/project');
@@ -14,6 +15,7 @@ const Event = require('./app/models/event');
 const userController = require('./app/controllers/user');
 
 const APP_PORT = envvar.number('APP_PORT', 8080);
+const NETEGG_PYTHON_URL = envvar.string('NETEGG_PYTHON_URL');
 
 const app = express();
 const router = express.Router();
@@ -37,23 +39,48 @@ const getScenario = function(scenarioId) {
 
 const getData = bluebird.coroutine(function* (project){
   const scenarios = yield bluebird.all(R.map(getScenario, project.scenarios));
-  project.scenarios = scenarios;
+  project.scenarios = scenarios
   return project;
 });
 
-// const submitEvent = function(eventId) {
-//   return Event.findById(eventId).exec().then(eventObj => {
-//     const keys = R.sort((a,b) => { return a - b; }, R.keys(eventObj.packet));
-//     const packet = R.props(keys, eventObj.packet);
-//     if (eventObj.action.actionString)
-//   })
-// }
+const submitEvent = function(eventId) {
+  return Event.findById(eventId).exec().then(eventObj => {
+    const keys = R.sort((a,b) => { return a - b; }, R.keys(eventObj.eventPacket));
+    const packet = R.props(keys, eventObj.eventPacket);
+    let action;
+    if (eventObj.eventAction.actionString == 'Forward(p)') {
+      action = 'fwd(' + eventObj.eventAction.p + ')'
+    } else if (eventObj.eventAction.actionString == 'Modify(f,v)') {
+      action = 'modify(' + eventObj.eventAction.f + ',' + eventObj.eventAction.v + ')'
+    } else {
+      action = eventObj.eventAction.actionString.toString().toLowerCase()
+    }
+    return {
+      packet: packet,
+      actions: [action]
+    }
+  })
+}
 
-// const submitData = bluebird.coroutine(function* (project){
-//   const format = R.sort((a,b) => { return a - b; }, R.keys(project.eventFormat));
+const submitScenario = function(scenarioId) {
+  return Scenario.findById(scenarioId).exec().then(bluebird.coroutine(function*(scenario) {
+    const events = yield bluebird.all(R.map(submitEvent, scenario.events));
+    return {
+      name: scenario.scenarioName,
+      events: events
+    }
+  }));
+}
 
-
-// })
+const submitData = bluebird.coroutine(function* (project){
+  const format = R.sort((a,b) => { return a - b; }, R.keys(project.packetFormat));
+  const scenarios = yield bluebird.all(R.map(submitScenario, project.scenarios));
+  return {
+    name: project.projectName,
+    format: format,
+    scenarios: scenarios
+  }
+})
 
 app.use(bodyParser.json());
 
@@ -90,7 +117,7 @@ app.post('/project', (req, res) => {
   const projectId = req.body.projectId;
 
   Project.findById(projectId).exec().then(resp => {
-    if (resp.userId === userId) {
+    if (resp.userId == userId) {
       getData(resp).then(project => {
         res.send(project);
       });
@@ -120,7 +147,6 @@ app.post('/project/editname', (req, res) => {
   const userId = req.body.userId;
   const projectId = req.body.projectId;
   const projectName = req.body.projectName;
-  console.log()
   Project.findById(projectId).exec().then(resp => {
     if(resp.userId === userId) {
       resp.projectName = projectName;
@@ -143,7 +169,7 @@ app.post('/project/update', (req, res) => {
   const projectId = req.body.projectId;
   Project.findById(projectId).exec().then(resp => {
     if (resp.userId === userId) {
-      resp.eventFormat = req.body.eventFormat;
+      resp.packetFormat = req.body.packetFormat;
 
       resp.save().then(resp2 => {
         getData(resp2).then(project => {
@@ -164,7 +190,6 @@ app.post('/project/delete', (req, res) => {
   const project = Project.findById(projectId).exec().then(resp => {
     if (resp.userId == userId) {
       resp.remove().then(resp2 => {
-        console.log(resp2);
         res.sendStatus(200);
       });
     } else {
@@ -209,7 +234,7 @@ app.post('/project/scenario', (req, res) => {
       Project.findOne({ scenarios: scenarioId }).exec().then(project => {
         getScenario(resp).then(resp2 => {
           res.send({
-            eventFormat: project.eventFormat,
+            packetFormat: project.packetFormat,
             events: resp2.events
           });
         });
@@ -282,7 +307,7 @@ app.post('/project/scenario/event/new', (req, res) => {
     if (project.userId == userId) {
       const newEvent = Event({
         userId: userId,
-        eventPacket: project.eventFormat,
+        eventPacket: project.packetFormat,
         eventAction: {
           actionString: "",
           f: "",
@@ -298,7 +323,7 @@ app.post('/project/scenario/event/new', (req, res) => {
               getScenario(newScenario).then(resp2 => {
                 res.send({
                   scenarioId: newScenario.id,
-                  eventFormat: project.eventFormat,
+                  packetFormat: project.packetFormat,
                   events: resp2.events
                 });
               })  
@@ -318,19 +343,19 @@ app.post('/project/scenario/event/new', (req, res) => {
 app.post('/project/scenario/event/edit', (req, res) => {
   const userId = req.body.userId;
   const eventId = req.body.eventId; 
-  console.log(req.body.eventPacket);
+  
   Event.findById(eventId).exec().then(eventObj => {
     if (eventObj.userId == userId) {
       eventObj.eventPacket = req.body.eventPacket;
       eventObj.eventAction = req.body.eventAction;
       eventObj.save().then(resp => {
-        console.log(resp);
+        
         Scenario.findOne({ events: resp.id }).exec().then(resp2 => {
         Project.findOne({ scenarios: resp2.id }).exec().then(resp3 => {
           getScenario(resp2).then(scenario => {
             res.send({
               scenarioId: resp2.id,
-              eventFormat: resp3.eventFormat,
+              packetFormat: resp3.packetFormat,
               events: scenario.events
             })
           })
@@ -356,7 +381,7 @@ app.post('/project/scenario/event/delete', (req, res) => {
             getScenario(resp).then(data => {
               Project.findOne({ scenarios: data.id }).exec().then(project => {
                 res.send({
-                  eventFormat: project.eventFormat,
+                  packetFormat: project.packetFormat,
                   scenarioId: data.id,
                   events: data.events
                 });  
@@ -370,12 +395,31 @@ app.post('/project/scenario/event/delete', (req, res) => {
   })
 });
 
-app.post('/project/submit', (req, res) => {
+app.post('/project/build', (req, res) => {
   const userId = req.body.userId;
   const projectId = req.body.projectId;
-  Project.findById(projectid).exec().then(resp => {
+  Project.findById(projectId).exec().then(resp => {
     submitData(resp).then(project => {
 
+      console.log(project);
+
+      const options = {
+        uri: NETEGG_PYTHON_URL + '/build',
+        method: 'POST',
+        json: {
+          userId: userId,
+          projectId: projectId,
+          projectName: resp.projectName,
+          projectData: project
+        }
+      }
+
+      rp(options).then(build => {
+        resp.builds = R.prepend(build, resp.builds);
+        resp.save().then(savedProject => {
+          res.send(savedProject);
+        })
+      })
     })
   })
 })
